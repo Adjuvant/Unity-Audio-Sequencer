@@ -107,7 +107,15 @@ internal class Sequencer : SequencerBase
     /// </summary>
     public int NumberOfSteps
     {
-        get { return sequence.Length; }
+        get { return sequence.Length; } // TODO replace this with measure amount eg 16, can then muddle with wrapping
+    }
+
+    public int StepDivisions
+    {
+        get
+        {
+            return 16;
+        }
     }
 
     #endregion
@@ -115,7 +123,9 @@ internal class Sequencer : SequencerBase
     #region Nested type: BackBuffer
 
     #region Structs
-
+    /// <summary>
+    /// BackBuffer is equivalent to a voice, but is a specifcally filled buffer rather than a pointer to a piece of sample memory.
+    /// </summary>
     public class BackBuffer
     {
         #region Fields
@@ -626,10 +636,12 @@ internal class Sequencer : SequencerBase
         if (_activeBackBuffers != null) _activeBackBuffers.Clear();
 
         double samplesTotal = _sampleRate * 60.0F / bpm * 4.0F;
-        double samplesPerTick = samplesTotal / NumberOfSteps;
+        // double samplesPerTick = samplesTotal / NumberOfSteps;        
+        double samplesPerTick = samplesTotal / StepDivisions;
         double newSamplePos = samplesTotal * _newPercentage;
         double currentTickDouble = newSamplePos / samplesPerTick;
-        _currentStep = (int)Math.Round(currentTickDouble, MidpointRounding.ToEven);
+        _currentStep = (int)Math.Round(currentTickDouble, MidpointRounding.ToEven);       
+
         if (log) print("Set Percentage: " + _currentStep + " (%" + _newPercentage + ")");
         _newPercentage = -1;
     }
@@ -693,7 +705,8 @@ internal class Sequencer : SequencerBase
     void OnAudioFilterRead(float[] bufferData, int bufferChannels)
     {
         if (!IsReady || !_isPlaying) return;
-        double samplesPerTick = _sampleRate * 60.0F / bpm * 4.0F / NumberOfSteps;
+        // double samplesPerTick = _sampleRate * 60.0F / bpm * 4.0F / NumberOfSteps;        
+        double samplesPerTick = _sampleRate * 60.0F / bpm * 4.0F / StepDivisions;
         double sample = AudioSettings.dspTime * _sampleRate;
         if (_newPercentage > -1)
         {
@@ -711,9 +724,11 @@ internal class Sequencer : SequencerBase
                 {
                     dataLeft = (int)(newSample - _nextTick);
                     _nextTick += samplesPerTick;
-                    if (++_currentStep > NumberOfSteps) _currentStep = 1;
+                    // if (++_currentStep > NumberOfSteps) _currentStep = 1;
+                    if (++_currentStep > StepDivisions) _currentStep = 1;
                     _progress = _currentStep * samplesPerTick;
-                    if (sequence[_currentStep - 1])
+                    // if (sequence[_currentStep - 1])                    
+                    if (sequence[(_currentStep - 1)%NumberOfSteps])
                     {
                         _index = 0;
                         if (onBeat != null) _fireBeatEvent++;
@@ -729,18 +744,22 @@ internal class Sequencer : SequencerBase
         }
         else
         {
+            // Cycle through audio buffer to be written (bufferData)
             for (int dataIndex = 0; dataIndex < bufferData.Length / bufferChannels; dataIndex++)
             {
                 if (_activeBackBuffers != null)
                 {
+                    // Cycle through prepared sample data "voices" and layer the sound, less backbuffers more voice stealing.
                     for (int backBufferIndex = 0; backBufferIndex < _activeBackBuffers.Count; backBufferIndex++)
                     {
                         BackBuffer bb = _activeBackBuffers[backBufferIndex];
 
                         int clipChannel = 0;
                         int sourceChannel = 0;
+                        // Add sample of voice data to the current audio buffer
                         while (sourceChannel < bufferChannels)
                         {
+                            // Add data to output buffer from backbuffers.
                             bufferData[dataIndex * bufferChannels + sourceChannel] +=
                                 bb.data[bb.index * _clipChannels + clipChannel];
 
@@ -748,8 +767,9 @@ internal class Sequencer : SequencerBase
                             clipChannel++;
                             if (clipChannel == _clipChannels - 1) clipChannel = 0;
                         }
-
+                        // Index is stored in the voice object (BackBuffer)
                         bb.index++;
+                        // If the voice is finished, add it to the voice pool
                         if (bb.index >= bb.data.Length / bufferChannels)
                         {
                             ReleaseBackBuffer(backBufferIndex);
@@ -758,7 +778,7 @@ internal class Sequencer : SequencerBase
                         }
                     }
                 }
-
+                // If the clip is playing, add its samples to the buffer
                 if (_index != -1)
                 {
                     int clipChannel = 0;
@@ -772,7 +792,7 @@ internal class Sequencer : SequencerBase
                         clipChannel++;
                         if (clipChannel == _clipChannels - 1) clipChannel = 0;
                     }
-
+                    
                     _index++;
                     if (_index >= _clipData.Length / _clipChannels)
                     {
@@ -788,12 +808,13 @@ internal class Sequencer : SequencerBase
                     AddToBackBuffer(bufferChannels);
 
                     _nextTick += samplesPerTick;
-                    if (++_currentStep > NumberOfSteps)
+                    // if (++_currentStep > NumberOfSteps)                   
+                    if (++_currentStep > StepDivisions)
                     {
                         _currentStep = 1;
-                    }
+                    }                
                     _progress = _currentStep * samplesPerTick;
-                    if (sequence[_currentStep - 1])
+                    if (sequence[(_currentStep - 1)%NumberOfSteps])
                     {
                         _index = 0;
                         if (onBeat != null)
